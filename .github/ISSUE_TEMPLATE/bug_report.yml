@@ -1,0 +1,27 @@
+name: Bug 反馈
+description: 报告可复现的问题（请勿提交账号、令牌或私人文件）
+body:
+  - type: input
+    id: version
+    attributes:
+      label: 应用版本 / 构建类型
+      placeholder: "例如 1.0.0+1，debug 或 release"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Android 版本、设备型号、Cloudreve 服务端版本
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤、预期结果和实际结果
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 脱敏截图或日志
+      description: 删除密码、Authorization、Cookie、带签名的下载地址、分享密码及私人文件名。

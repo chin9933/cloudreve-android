@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version-file: .fvmrc
+          channel: stable
+      - name: Restore locked dependencies
+        run: flutter pub get --enforce-lockfile
+      - name: Verify repository hygiene
+        run: node tool/check_repository.mjs
+      - name: Test build configuration
+        run: node --test tool/build_android_test.mjs
+      - name: Verify Dart format
+        run: dart format --output=none --set-exit-if-changed lib test
+      - name: Analyze (including informational diagnostics)
+        run: dart analyze --fatal-infos
+      - name: Test
+        run: flutter test --no-pub --coverage
+      - name: Build Android smoke APK (never publish or sign a release)
+        run: |
+          chmod +x android/gradlew
+          flutter build apk --debug --no-pub --target-platform android-arm64

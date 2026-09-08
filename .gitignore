@@ -1,52 +1,58 @@
-# Miscellaneous
-*.class
-*.log
-*.pyc
-*.swp
+# Editors and operating systems
 .DS_Store
-.atom/
-.buildlog/
-.history
-.svn/
-
-# IntelliJ related
+Thumbs.db
+*.swp
 *.iml
 *.ipr
 *.iws
 .idea/
+.vscode/
+.history/
 
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
-
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
+# Dart / Flutter caches and generated build output
 .dart_tool/
 .flutter-plugins
 .flutter-plugins-dependencies
 .packages
 .pub-cache/
 .pub/
-/build/
-
-# Web related
+.fvm/
+**/build/
+**/doc/api/
+**/ios/Flutter/.last_build_id
 lib/generated_plugin_registrant.dart
-
-# Symbolication related
+/android/app/debug/
+/android/app/profile/
+/android/app/release/
+coverage/
+*.class
+*.pyc
+__pycache__/
 app.*.symbols
-
-# Obfuscation related
 app.*.map.json
 
-# Android Studio will place build artifacts here
-/android/app/debug
-/android/app/profile
-/android/app/release
+# Local diagnostics can contain account data, signed URLs and screenshots.
+# Keep these files locally; never commit them.
+outputs/
+.tooling/
+*.log
+*.apk
+*.aab
 
-/.vscode/**
+# Machine configuration and signing credentials
+.env
+.env.*
+!.env.example
+config/*.local.json
+**/local.properties
+**/key.properties
+*.keystore
+*.jks
+*.p12
+*.pfx
+*.pem
+*.key
 
-# FVM Version Cache
-.fvm/
-pubspec.lock
+# This is an application: the root pubspec.lock MUST be versioned.
+# The generated SDK is a library and resolves through the application's lock.
+api/pubspec.lock

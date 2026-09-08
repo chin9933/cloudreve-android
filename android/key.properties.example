@@ -1,0 +1,6 @@
+# Copy to key.properties (ignored by Git); keep the real file private.
+# Use an absolute keystore path. On Windows, use forward slashes.
+storeFile=/absolute/path/to/release.jks
+storePassword=CHANGE_ME
+keyAlias=upload
+keyPassword=CHANGE_ME
