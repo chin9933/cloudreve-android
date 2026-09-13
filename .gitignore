@@ -44,6 +44,7 @@ outputs/
 .env.*
 !.env.example
 config/*.local.json
+/tool/environment.local.cmd
 **/local.properties
 **/key.properties
 *.keystore

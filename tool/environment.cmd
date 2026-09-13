@@ -26,6 +26,8 @@ if not exist "%FLUTTER_SDK%\bin\flutter.bat" (
 )
 if not defined JAVA_HOME for /d %%I in ("%TOOLING_ROOT%\temurin17\jdk-*") do set "JAVA_HOME=%%~fI"
 if defined JAVA_HOME set "PATH=%JAVA_HOME%\bin;%PATH%"
+if exist "%~dp0environment.local.cmd" call "%~dp0environment.local.cmd"
+if errorlevel 1 exit /b 1
 set "FLUTTER_NO_ANALYTICS=true"
 set "FLUTTER_NO_VERSION_CHECK=true"
 exit /b 0

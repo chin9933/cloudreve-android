@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:cloudreve/config/app_config.dart';
+import 'package:cloudreve/state/download_history_controller.dart';
 import 'package:cloudreve/utils/request_cache.dart';
 
 import 'package:cloudreve_api_client/cloudreve_api_client.dart'
@@ -100,6 +101,11 @@ class HttpUtil {
     _refreshToken = refreshToken;
     _refreshTokenExpiresAt = refreshExpires;
     dio.options.headers['Authorization'] = 'Bearer $accessToken';
+    if (!preserveSession) {
+      DownloadHistoryController.instance
+          .setAccount(dio.options.baseUrl, userId)
+          .ignore();
+    }
   }
 
   static void clearAuthToken() {
@@ -111,6 +117,7 @@ class HttpUtil {
     _refreshToken = null;
     _refreshTokenExpiresAt = null;
     dio.options.headers.remove('Authorization');
+    DownloadHistoryController.instance.setAccount(null, null).ignore();
   }
 
   static String? get accessToken => _accessToken;

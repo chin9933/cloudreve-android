@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cloudreve/state/download_history_controller.dart';
 import 'package:cloudreve/utils/cloudreve_repository.dart';
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
@@ -86,6 +87,7 @@ class CloudreveAudioController extends ChangeNotifier {
   bool _handlingCompletion = false;
   bool _disposed = false;
   int _loadToken = 0;
+  DownloadHandle? _historyTask;
 
   List<CloudreveAudioTrack> get queue => List.unmodifiable(_queue);
   int get currentIndex => _currentIndex;
@@ -182,6 +184,7 @@ class CloudreveAudioController extends ChangeNotifier {
 
   Future<void> close() async {
     _loadToken++;
+    _historyTask?.cancel();
     await _player.stop();
     _queue = const [];
     _currentIndex = -1;
@@ -200,6 +203,7 @@ class CloudreveAudioController extends ChangeNotifier {
     if (track == null) return false;
 
     final token = ++_loadToken;
+    _historyTask?.cancel();
     _loading = true;
     _errorMessage = null;
     _position = Duration.zero;
@@ -207,10 +211,23 @@ class CloudreveAudioController extends ChangeNotifier {
     _duration = Duration.zero;
     _notify();
 
+    DownloadHandle? task;
     try {
+      task = await DownloadHistoryController.instance.begin(
+        name: track.name,
+        kind: TransferKind.audio,
+      );
+      if (_disposed || token != _loadToken) {
+        task.cancel();
+        return false;
+      }
+      _historyTask = task;
       await _player.stop();
       final url = await _resolveDownloadUrl(track);
-      if (_disposed || token != _loadToken) return false;
+      if (_disposed || token != _loadToken || !task.active) {
+        task.cancel();
+        return false;
+      }
       if (url == null || url.isEmpty) {
         throw StateError('empty audio url');
       }
@@ -224,19 +241,31 @@ class CloudreveAudioController extends ChangeNotifier {
           error,
           stackTrace,
         );
-        if (_disposed || token != _loadToken) return false;
+        if (_disposed || token != _loadToken || !task.active) {
+          task.cancel();
+          return false;
+        }
         final refreshedUrl = await _resolveDownloadUrl(track);
+        if (_disposed || token != _loadToken || !task.active) {
+          task.cancel();
+          return false;
+        }
         if (refreshedUrl == null || refreshedUrl.isEmpty) rethrow;
         duration = await _player.setUrl(refreshedUrl);
       }
-      if (_disposed || token != _loadToken) return false;
+      if (_disposed || token != _loadToken || !task.active) {
+        task.cancel();
+        return false;
+      }
       _duration = duration ?? _player.duration ?? Duration.zero;
       _loading = false;
       _errorMessage = null;
       _notify();
+      task.opened();
       if (autoplay) _startPlayback(token);
       return true;
     } catch (error, stackTrace) {
+      task?.fail();
       _debugFailure('audio load failed', error, stackTrace);
       if (_disposed || token != _loadToken) return false;
       _loading = false;
@@ -308,6 +337,8 @@ class CloudreveAudioController extends ChangeNotifier {
 
   @override
   void dispose() {
+    final historyTask = _historyTask;
+    scheduleMicrotask(() => historyTask?.cancel());
     _disposed = true;
     _loadToken++;
     for (final subscription in _subscriptions) {

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:cloudreve/component/video_player_controls.dart';
 import 'package:cloudreve/config/app_config.dart';
+import 'package:cloudreve/state/download_history_controller.dart';
 import 'package:cloudreve/theme/app_theme.dart';
 import 'package:cloudreve/utils/video_device_controls.dart';
 import 'package:flutter/material.dart';
@@ -14,9 +15,11 @@ class CloudreveVideoPlayerPage extends StatefulWidget {
     super.key,
     required this.title,
     required this.url,
+    this.historyTask,
   });
   final String title;
   final String url;
+  final DownloadHandle? historyTask;
   @override
   State<CloudreveVideoPlayerPage> createState() =>
       _CloudreveVideoPlayerPageState();
@@ -30,10 +33,12 @@ class _CloudreveVideoPlayerPageState extends State<CloudreveVideoPlayerPage> {
   final _subscriptions = <StreamSubscription<dynamic>>[];
   int _loadRevision = 0;
   bool _closing = false;
+  DownloadHandle? _historyTask;
 
   @override
   void initState() {
     super.initState();
+    _historyTask = widget.historyTask;
     _subscriptions.addAll([
       _player.stream.buffering.listen(
         (value) => _update((s) => s.copyWith(buffering: value)),
@@ -80,6 +85,7 @@ class _CloudreveVideoPlayerPageState extends State<CloudreveVideoPlayerPage> {
       );
       if (!mounted || _closing || revision != _loadRevision) return;
       _update((s) => s.copyWith(opening: false));
+      _historyTask?.opened();
     } catch (error) {
       // Native errors can contain signed media URLs: do not log their contents.
       debugPrint('Cloudreve video open failed: ${error.runtimeType}');
@@ -89,18 +95,39 @@ class _CloudreveVideoPlayerPageState extends State<CloudreveVideoPlayerPage> {
     }
   }
 
-  void _showPlaybackError() => _update(
-    (s) => s.copyWith(
-      opening: false,
-      buffering: false,
-      error: '视频加载失败，请检查网络后重试；若仍无法播放，文件编码可能不受设备支持。',
-    ),
-  );
+  void _showPlaybackError() {
+    _historyTask?.fail();
+    _update(
+      (s) => s.copyWith(
+        opening: false,
+        buffering: false,
+        error: '视频加载失败，请检查网络后重试；若仍无法播放，文件编码可能不受设备支持。',
+      ),
+    );
+  }
 
   Future<void> _retry() async {
     _loadRevision++;
     await _player.stop();
-    if (mounted && !_closing) await _openVideo();
+    if (!mounted || _closing) return;
+    if (widget.historyTask != null) {
+      final history = DownloadHistoryController.instance;
+      if (widget.historyTask!.revision != history.revision) return;
+      _historyTask?.cancel();
+      try {
+        _historyTask = await history.begin(
+          name: widget.title,
+          kind: TransferKind.video,
+        );
+      } on StateError {
+        return;
+      }
+    }
+    if (!mounted || _closing) {
+      _historyTask?.cancel();
+      return;
+    }
+    await _openVideo();
   }
 
   Future<void> _togglePlayback() async {
@@ -122,6 +149,7 @@ class _CloudreveVideoPlayerPageState extends State<CloudreveVideoPlayerPage> {
   Future<void> _close() async {
     if (_closing) return;
     _closing = true;
+    _historyTask?.cancel();
     _loadRevision++;
     try {
       await _player.stop();
@@ -132,6 +160,8 @@ class _CloudreveVideoPlayerPageState extends State<CloudreveVideoPlayerPage> {
 
   @override
   void dispose() {
+    final historyTask = _historyTask;
+    scheduleMicrotask(() => historyTask?.cancel());
     _closing = true;
     _loadRevision++;
     for (final subscription in _subscriptions) {

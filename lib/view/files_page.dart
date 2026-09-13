@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:archive/archive_io.dart';
@@ -11,17 +10,17 @@ import 'package:cloudreve/component/share_dialog.dart';
 import 'package:cloudreve/component/share_result_dialog.dart';
 import 'package:cloudreve/entity/m_file.dart';
 import 'package:cloudreve/state/audio_player_controller.dart';
+import 'package:cloudreve/state/download_history_controller.dart';
 import 'package:cloudreve/state/sound_effect_provider.dart';
 import 'package:cloudreve/theme/app_theme.dart';
 import 'package:cloudreve/utils/cache_util.dart';
 import 'package:cloudreve/utils/cloudreve_repository.dart';
-import 'package:cloudreve/utils/http_util.dart';
+import 'package:cloudreve/utils/file_download_service.dart';
 import 'package:dio/dio.dart';
 import 'package:enough_convert/gbk.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:open_file/open_file.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -49,8 +48,6 @@ final videoRegex = RegExp(
   r'.*\.(avi|mp4|mpg|mpeg|mov|flv|mkv|wmv|webm)$',
   caseSensitive: false,
 );
-
-Map<int, CancelToken> downloadCancelTokenMap = {};
 
 Icon getIcon(MFile file) {
   final visual = fileVisualFor(file);
@@ -100,9 +97,6 @@ class _HomeState extends State<Home> {
   late final FlutterLocalNotificationsPlugin _flutterLocalNotificationsPlugin;
   late final CloudreveAudioController _audioController;
 
-  /// 默认下载路径
-  late String _downPath;
-  late final Future<void> _downloadDirectoryReady;
   MFile? _scheduledPreview;
   FileListing? _currentListing;
 
@@ -111,8 +105,6 @@ class _HomeState extends State<Home> {
     super.initState();
     _flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
     _audioController = CloudreveAudioController();
-    _downloadDirectoryReady = _initDownPath();
-    _downloadDirectoryReady.ignore();
     _scheduleRequestedPreview();
   }
 
@@ -120,10 +112,6 @@ class _HomeState extends State<Home> {
   void dispose() {
     _audioController.dispose();
     super.dispose();
-  }
-
-  Future<void> _initDownPath() async {
-    _downPath = (await getTemporaryDirectory()).path;
   }
 
   @override
@@ -722,18 +710,40 @@ class _HomeState extends State<Home> {
         return bytes;
       });
 
-  Future<Uint8List> _getImage(MFile file) =>
-      CacheUtil.cachedBytes('image', file.cacheVersion, () async {
-        final url = await _ensureDownloadUrl(
-          file.id,
-          file.contentUri,
-          contextHint: file.contentContextHint ?? _currentListing?.contextHint,
-        );
-        if (url == null) throw StateError('获取图片链接失败');
-        final bytes = await CloudreveRepository.fetchRaw(url);
-        if (bytes == null || bytes.isEmpty) throw StateError('图片内容为空');
-        return bytes;
-      });
+  Future<Uint8List> _getImage(MFile file) async {
+    final task = await DownloadHistoryController.instance.begin(
+      name: file.name,
+      kind: TransferKind.image,
+      total: file.size,
+    );
+    try {
+      await CloudreveRepository.resolveShortcut(file);
+      if (!task.active) throw StateError('登录状态已变更');
+      final bytes = await CacheUtil.cachedBytes(
+        'image',
+        file.cacheVersion,
+        () async {
+          final url = await _ensureDownloadUrl(
+            file.id,
+            file.contentUri,
+            contextHint:
+                file.contentContextHint ?? _currentListing?.contextHint,
+          );
+          if (!task.active) throw StateError('登录状态已变更');
+          if (url == null) throw StateError('获取图片链接失败');
+          final bytes = await CloudreveRepository.fetchRaw(url);
+          if (bytes == null || bytes.isEmpty) throw StateError('图片内容为空');
+          return bytes;
+        },
+      );
+      if (!task.active) throw StateError('登录状态已变更');
+      task.complete(bytes: bytes.length);
+      return bytes;
+    } catch (_) {
+      task.fail();
+      rethrow;
+    }
+  }
 
   /// 图片点击事件
   void _imageTap(BuildContext context, MFile file) {
@@ -774,102 +784,46 @@ class _HomeState extends State<Home> {
   /// 刷新函数
   Future<void> _refresh(BuildContext context) => _refreshCallback(true);
 
-  /// 下载按钮点击
-  void _downloadButtonTap(
+  /// Downloads are owned by the service, not the lifetime of this page.
+  Future<void> _downloadButtonTap(
     BuildContext context,
     BuildContext? dialogContext,
     MFile file,
   ) async {
-    await _downloadDirectoryReady;
-    if (!context.mounted) return;
-    final fileUri = _uriForFile(file);
-    if (fileUri == null) {
-      return;
+    if (dialogContext != null && dialogContext.mounted) {
+      Navigator.pop(dialogContext);
     }
-    final targetPath = _temporaryFilePath(file.name);
-    File f = File(targetPath);
-    var exist = await f.exists();
     if (!context.mounted) return;
-    if (exist) {
-      if (dialogContext != null && dialogContext.mounted) {
-        Navigator.pop(dialogContext);
-      }
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('文件已存在')));
-    } else {
-      final contextHint = _currentListing?.contextHint;
-      final url = await _ensureDownloadUrl(
-        file.id,
-        fileUri,
-        contextHint: contextHint,
+    final history = DownloadHistoryController.instance;
+    final revision = history.revision;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(const SnackBar(content: Text('已加入下载记录')));
+    try {
+      await FileDownloadService.instance.download(
+        file,
+        contextHint: file.contentContextHint ?? _currentListing?.contextHint,
       );
-      if (!context.mounted) return;
-      if (url == null) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('获取下载链接失败')));
-        return;
+      if (revision != history.revision) return;
+      if (context.mounted) {
+        messenger.showSnackBar(const SnackBar(content: Text('下载完成，可在下载记录中打开')));
       }
-      Dio dio = Dio();
-      if (dialogContext != null && dialogContext.mounted) {
-        Navigator.pop(dialogContext);
-      }
-      int fileHashCode = file.hashCode;
-      CancelToken cancelToken = CancelToken();
-      downloadCancelTokenMap[fileHashCode] = cancelToken;
-      Response<dynamic>? downloadResponse;
       try {
-        downloadResponse = await dio.download(
-          url,
-          targetPath,
-          cancelToken: cancelToken,
-          onReceiveProgress: (process, total) {
-            final percent = process / total;
-            unawaited(
-              _showDownloadNotification(
-                id: fileHashCode,
-                title: '下载 ${file.name}',
-                body: '${(percent * 100).toStringAsFixed(2)}%',
-                payload: 'download-doing-$fileHashCode',
-              ),
-            );
-          },
-        );
-      } on DioException catch (err) {
-        if (err.type == DioExceptionType.cancel) {
-          await _flutterLocalNotificationsPlugin.cancel(fileHashCode);
-          await _showDownloadNotification(
-            id: fileHashCode,
-            title: '下载 ${file.name}',
-            body: '已取消',
-            payload: 'download-cancel-$fileHashCode',
-          );
-        } else {
-          await _showDownloadNotification(
-            id: fileHashCode,
-            title: '下载 ${file.name}',
-            body: '下载出错',
-            payload: 'download-error-$fileHashCode',
-          );
-        }
-        return;
-      }
-      if (downloadResponse.statusCode == 200) {
-        await _flutterLocalNotificationsPlugin.cancel(fileHashCode);
         await _showDownloadNotification(
-          id: fileHashCode,
-          title: '下载 ${file.name}',
-          body: '至:$_downPath',
-          payload: 'download-done-$_downPath',
+          id: DateTime.now().millisecondsSinceEpoch.remainder(1 << 30),
+          title: '下载完成',
+          body: file.name,
+          payload: 'download-history',
         );
-      } else {
-        await _flutterLocalNotificationsPlugin.cancel(fileHashCode);
-        await _showDownloadNotification(
-          id: fileHashCode,
-          title: '下载 ${file.name}',
-          body: '下载出错',
-          payload: 'download-error-$fileHashCode',
-        );
+      } catch (_) {
+        /* Notifications are optional; the record is authoritative. */
       }
+    } catch (error) {
+      if (!context.mounted || revision != history.revision) return;
+      final cancelled =
+          error is DioException && error.type == DioExceptionType.cancel;
+      messenger.showSnackBar(
+        SnackBar(content: Text(cancelled ? '已取消下载' : '下载失败，可在下载记录中查看')),
+      );
     }
   }
 
@@ -882,15 +836,6 @@ class _HomeState extends State<Home> {
       fileUri,
       contextHint: contextHint,
     );
-  }
-
-  String _temporaryFilePath(String fileName, {String prefix = ''}) {
-    final safeName = fileName.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-    final separator = Platform.pathSeparator;
-    final base = _downPath.endsWith(separator)
-        ? _downPath.substring(0, _downPath.length - 1)
-        : _downPath;
-    return '$base$separator$prefix$safeName';
   }
 
   String? _uriForFile(MFile file) {
@@ -1047,25 +992,41 @@ class _HomeState extends State<Home> {
       ),
     );
 
+    DownloadHandle? task;
     try {
+      task = await DownloadHistoryController.instance.begin(
+        name: file.name,
+        kind: TransferKind.video,
+      );
       final url = await _freshPreviewUrlFor(file);
       // Do not animate a second loading indicator behind the video route.
       messenger.removeCurrentSnackBar();
-      if (!context.mounted) return;
+      if (!context.mounted || !task.active) {
+        task.cancel();
+        return;
+      }
 
       // Avoid mixing an already-playing music track with the video's audio.
       if (_audioController.playing) {
         await _audioController.togglePlayback();
       }
-      if (!context.mounted) return;
+      if (!context.mounted || !task.active) {
+        task.cancel();
+        return;
+      }
 
       await Navigator.of(context).push(
         cloudrevePageRoute<void>(
           context,
-          builder: (_) => CloudreveVideoPlayerPage(title: file.name, url: url),
+          builder: (_) => CloudreveVideoPlayerPage(
+            title: file.name,
+            url: url,
+            historyTask: task,
+          ),
         ),
       );
     } catch (error) {
+      task?.fail();
       messenger.hideCurrentSnackBar();
       if (!context.mounted) return;
       messenger.showSnackBar(
@@ -1106,40 +1067,12 @@ class _HomeState extends State<Home> {
     return url;
   }
 
-  Future<String> _cacheFileForPreview(MFile file) async {
-    await _downloadDirectoryReady;
-    await CloudreveRepository.resolveShortcut(file);
-    final cacheKey =
-        '${HttpUtil.dio.options.baseUrl.hashCode}-${file.id}-${file.size}-${file.date.hashCode}';
-    final targetPath = _temporaryFilePath(
-      file.name,
-      prefix: 'preview-$cacheKey-',
-    );
-    final target = File(targetPath);
-    if (await target.exists()) {
-      final cachedSize = await target.length();
-      if (file.size > 0 && cachedSize == file.size) return targetPath;
-    }
-
-    final partial = File('$targetPath.part');
-    final client = Dio();
-    try {
-      final response = await client.download(
-        await _previewUrlFor(file),
-        partial.path,
+  Future<String> _cacheFileForPreview(MFile file) =>
+      FileDownloadService.instance.download(
+        file,
+        preview: true,
+        contextHint: file.contentContextHint ?? _currentListing?.contextHint,
       );
-      if (response.statusCode != 200 ||
-          !await partial.exists() ||
-          (file.size > 0 && await partial.length() != file.size)) {
-        throw StateError('文件下载不完整，请重试');
-      }
-      await partial.rename(targetPath);
-    } finally {
-      client.close();
-      if (await partial.exists()) await partial.delete();
-    }
-    return targetPath;
-  }
 
   Future<List<_ArchiveEntryInfo>> _loadZipEntries(MFile file) async {
     final localPath = await _cacheFileForPreview(file);
@@ -1186,20 +1119,36 @@ class _HomeState extends State<Home> {
         ),
       ),
     );
+    DownloadHandle? task;
     try {
+      task = await DownloadHistoryController.instance.begin(
+        name: file.name,
+        kind: TransferKind.document,
+      );
+      final url = await _previewUrlFor(file);
+      if (!task.active || !context.mounted) {
+        task.cancel();
+        return;
+      }
       final launched = await launchUrl(
-        Uri.parse(await _previewUrlFor(file)),
+        Uri.parse(url),
         mode: LaunchMode.inAppWebView,
         webViewConfiguration: const WebViewConfiguration(
           enableJavaScript: true,
           enableDomStorage: true,
         ),
       );
+      if (launched) {
+        task.opened();
+      } else {
+        task.fail();
+      }
       messenger.hideCurrentSnackBar();
       if (!launched && context.mounted) {
         await _showUnsupportedPreview(context, file);
       }
     } catch (_) {
+      task?.fail();
       messenger.hideCurrentSnackBar();
       if (context.mounted) {
         messenger.showSnackBar(

@@ -2,6 +2,7 @@ import 'package:cloudreve/app/main_home.dart';
 import 'package:cloudreve/entity/login_result.dart';
 import 'package:cloudreve/entity/storage_summary.dart';
 import 'package:cloudreve/state/app_state.dart';
+import 'package:cloudreve/state/download_history_controller.dart';
 import 'package:cloudreve/state/page_transition_provider.dart';
 import 'package:cloudreve/state/sound_effect_provider.dart';
 import 'package:cloudreve/theme/app_theme.dart';
@@ -74,6 +75,12 @@ void main() {
       await transitions.setStyle(PageTransitionStyle.fade);
       final soundEffects = SoundEffectProvider();
       await soundEffects.initialize();
+      final history = DownloadHistoryController.instance;
+      await history.setAccount(
+        'https://top-action.example.com/api/v4/',
+        'top-action-test',
+      );
+      addTearDown(() => history.setAccount(null, null));
 
       late final GoRouter router;
       router = GoRouter(
@@ -151,6 +158,25 @@ void main() {
       expect(tester.widget<Offstage>(offstage(1)).offstage, isFalse);
       expect(tester.widget<Offstage>(offstage(2)).offstage, isTrue);
       expect(tester.widget<Offstage>(offstage(3)).offstage, isTrue);
+
+      expect(find.byKey(const Key('download-history-entry')), findsNothing);
+      final download = await history.begin(
+        name: 'top-action.pdf',
+        kind: TransferKind.download,
+        total: 4,
+      );
+      await tester.pump();
+      expect(find.byKey(const Key('download-history-entry')), findsOneWidget);
+      expect(find.byTooltip('搜索'), findsOneWidget);
+      expect(find.byKey(const Key('file-sort-menu')), findsOneWidget);
+      download.complete(bytes: 4);
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('download-history-entry')));
+      await tester.pumpAndSettle();
+      expect(find.text('top-action.pdf'), findsOneWidget);
+      expect(find.text('文件下载 · 已完成'), findsOneWidget);
+      await tester.tap(find.byTooltip('返回'));
+      await tester.pumpAndSettle();
 
       // The old opacity layer may still own a detached debug object, but it must
       // no longer be attached to the composited scene after Offstage settles.

@@ -5,11 +5,13 @@ import 'package:cloudreve/component/import_share_dialog.dart';
 import 'package:cloudreve/component/m_drawer.dart';
 import 'package:cloudreve/entity/m_file.dart';
 import 'package:cloudreve/state/app_state.dart';
+import 'package:cloudreve/state/download_history_controller.dart';
 import 'package:cloudreve/state/page_transition_provider.dart';
 import 'package:cloudreve/state/sound_effect_provider.dart';
 import 'package:cloudreve/theme/app_theme.dart';
 import 'package:cloudreve/utils/cloudreve_repository.dart';
 import 'package:cloudreve/view/dashboard_home.dart';
+import 'package:cloudreve/view/download_history_page.dart';
 import 'package:cloudreve/view/files_page.dart';
 import 'package:cloudreve/view/profile_page.dart';
 import 'package:cloudreve/view/shares_page.dart';
@@ -21,7 +23,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:go_router/go_router.dart';
-import 'package:open_file/open_file.dart';
 import 'package:provider/provider.dart';
 
 Map<int, CancelToken> uploadCancelTokenMap = {};
@@ -305,6 +306,7 @@ class _MainHomeState extends State<MainHome> {
           tooltip: '搜索',
           onPressed: _showSearch,
         ),
+        const _DownloadHistoryTopAction(),
         _TopSortMenuButton<CompareFunction>(
           key: const Key('file-sort-menu'),
           value: _compare,
@@ -786,17 +788,10 @@ class _MainHomeState extends State<MainHome> {
   }
 
   void _onSelectNotification(NotificationResponse notificationResponse) {
-    String s = notificationResponse.payload!;
+    final s = notificationResponse.payload;
+    if (s == null || !mounted) return;
     if (s.startsWith('download')) {
-      String downloadString = s.substring(9);
-      if (downloadString.startsWith('doing')) {
-        CancelToken cancelToken =
-            downloadCancelTokenMap[int.parse(downloadString.substring(6))]!;
-        cancelToken.cancel();
-        downloadCancelTokenMap.remove(int.parse(downloadString.substring(6)));
-      } else if (downloadString.startsWith('done')) {
-        OpenFile.open(downloadString.substring(5));
-      }
+      showDownloadHistory(context);
     } else if (s.startsWith('upload')) {
       String uploadString = s.substring(7);
       if (uploadString.startsWith('doing')) {
@@ -997,14 +992,17 @@ class CompareFunction {
 
 class _TopIconButton extends StatelessWidget {
   const _TopIconButton({
+    super.key,
     required this.icon,
     required this.tooltip,
     required this.onPressed,
+    this.badgeCount = 0,
   });
 
   final IconData icon;
   final String tooltip;
   final VoidCallback onPressed;
+  final int badgeCount;
 
   @override
   Widget build(BuildContext context) {
@@ -1012,7 +1010,11 @@ class _TopIconButton extends StatelessWidget {
       tooltip: tooltip,
       enableFeedback: context.watch<SoundEffectProvider?>()?.enabled ?? true,
       onPressed: onPressed,
-      icon: Icon(icon),
+      icon: Badge(
+        isLabelVisible: badgeCount > 0,
+        label: Text('$badgeCount'),
+        child: Icon(icon),
+      ),
       style: IconButton.styleFrom(
         backgroundColor: Theme.of(context).colorScheme.surface,
         foregroundColor: Theme.of(context).colorScheme.onSurface,
@@ -1020,6 +1022,28 @@ class _TopIconButton extends StatelessWidget {
         padding: EdgeInsets.zero,
         shape: const CircleBorder(),
       ),
+    );
+  }
+}
+
+class _DownloadHistoryTopAction extends StatelessWidget {
+  const _DownloadHistoryTopAction();
+
+  @override
+  Widget build(BuildContext context) {
+    final history = DownloadHistoryController.instance;
+    return ListenableBuilder(
+      listenable: history,
+      builder: (context, _) {
+        if (history.records.isEmpty) return const SizedBox.shrink();
+        return _TopIconButton(
+          key: const Key('download-history-entry'),
+          icon: Icons.download_rounded,
+          tooltip: '下载记录',
+          badgeCount: history.activeCount,
+          onPressed: () => showDownloadHistory(context),
+        );
+      },
     );
   }
 }

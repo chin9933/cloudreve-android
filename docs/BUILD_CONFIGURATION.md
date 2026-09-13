@@ -62,7 +62,7 @@ flutter build apk --release --split-per-abi --dart-define-from-file=config/app.l
 ## 安全与升级
 
 - 所有这些配置均可从 APK 中读取。Base64 传递不提供保密性，禁止填写账号、令牌、密码或签名密钥。
-- 正式签名继续使用 `android/key.properties` 或 `CLOUDREVE_KEYSTORE_*` 等受保护环境变量，见 [发布清单](RELEASE_CHECKLIST.md)。如需指定已有本地测试签名，显式设置 `CLOUDREVE_DEBUG_KEYSTORE`；仓库不再探测个人命名的密钥文件。
+- 正式签名继续使用 `android/key.properties` 或 `CLOUDREVE_KEYSTORE_*` 等受保护环境变量，见 [发布清单](RELEASE_CHECKLIST.md)。开发构建需要长期覆盖升级时，可复制 `tool/environment.local.example.cmd` 为被 Git 忽略的 `tool/environment.local.cmd`，并通过 `CLOUDREVE_DEBUG_KEYSTORE` 指向同一把本地测试密钥；不要把私钥、密码或个人绝对路径提交到仓库。
 - APK 包名与 Java 源码命名空间分开配置，原生入口保持稳定。修改包名会成为独立应用；要覆盖升级旧应用，必须沿用原包名与签名证书。原账号和本地缓存不会跨包名自动迁移。参见 [Android 应用 ID 与命名空间说明](https://developer.android.com/build/configure-app-module)。
 - 已有安装保留自己选择的服务器与安全会话，不强制切换到新构建默认站点。旧版本若从未保存隐式默认站点、也没有可恢复会话，则需要重新添加地址，不猜测维护者的旧站点。
 - 图标仍使用仓库中的通用资源；这些参数不修改图标、许可证或原作者署名。保留“基于原项目开发”及上游仓库引用。
