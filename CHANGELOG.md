@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### GitHub 通用 Android 发行
+
+- 增加手动或版本标签触发的 GitHub Actions 发行流程，使用无预设服务器的通用元数据构建正式签名 APK。
+- 按 ABI 发布 APK、SHA-256 校验和、短期 Actions Artifact、可直接下载的 GitHub Release，以及显示在 Packages 页面的 GHCR APK 集合。
+- 正式签名仅从 GitHub Secrets 注入，仓库与构建日志不保存密钥、密码、个人站点或个人包名。
+
 ### 下载与预览记录
 
 - 在“我的文件”顶栏加入按记录显示的下载入口，与搜索及排序按钮并列，支持状态、进度、筛选、取消、打开本地文件和清除已结束记录。

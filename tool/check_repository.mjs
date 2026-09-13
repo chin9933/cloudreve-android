@@ -42,6 +42,9 @@ const required = [
   'README.md', 'CONTRIBUTING.md', 'SECURITY.md', 'THIRD_PARTY_NOTICES.md',
   '.editorconfig', '.gitattributes', '.fvmrc', 'pubspec.lock',
   '.github/workflows/ci.yml',
+  '.github/workflows/publish-android.yml',
+  '.dockerignore', 'config/release.generic.json',
+  'packaging/android-apk.Dockerfile',
   'android/gradlew', 'android/gradlew.bat', 'android/gradle/wrapper/gradle-wrapper.jar',
 ];
 for (const path of required) {

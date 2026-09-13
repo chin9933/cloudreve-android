@@ -35,6 +35,15 @@ flutter build apk --release --split-per-abi --dart-define-from-file=config/app.l
 
 `--local-test` 或 `-PallowDebugReleaseSigning=true` 只用于本地 release 模式验证。默认禁止将未配置正式签名的 release 当作发行版。已安装的测试签名包通常不能被另一个正式签名包覆盖，迁移前需说明账号和本地数据处理方式。
 
+GitHub 托管发行使用以下仓库 Secrets；密钥内容、密码和个人路径不得写入工作流或配置文件：
+
+- `ANDROID_RELEASE_KEYSTORE_BASE64`
+- `ANDROID_RELEASE_STORE_PASSWORD`
+- `ANDROID_RELEASE_KEY_ALIAS`
+- `ANDROID_RELEASE_KEY_PASSWORD`
+
+`.github/workflows/publish-android.yml` 只读取 `config/release.generic.json`：包名为通用标识且默认站点为空。工作流会生成按 ABI 拆分的 APK、校验和与短期 Actions Artifact，并把相同文件发布为 GitHub Release 资产。由于 GitHub Packages 不支持裸 APK，工作流还会把 APK 集合封装为 `ghcr.io/<owner>/cloudreve-android-apk` 容器包，以便在 Packages 页面留存版本。
+
 ## 设备验收与发行材料
 
 - [ ] 真机验收登录/退出、注册验证、上传下载、重命名、分享转存与预览。
@@ -42,4 +51,4 @@ flutter build apk --release --split-per-abi --dart-define-from-file=config/app.l
 - [ ] 检查 release 包安装、冷启动、重复开关播放器和后台恢复。
 - [ ] 使用 apksigner 验证证书与包签名，核对版本、权限和 ABI。
 - [ ] 对每个发行 APK 计算 SHA-256，并附更新说明和许可材料。
-- [ ] 发包经人工确认；本仓库 CI 不自动创建 Release、不上传任何 APK。
+- [ ] 发包经人工确认；仅在手动触发发行工作流或推送匹配版本的 `v*` 标签时创建 Release 与 Packages 版本。

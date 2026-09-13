@@ -13,6 +13,13 @@ test('generic defaults have no deployment server; version comes from pubspec', (
   assert.ok(!gradleArguments(options).includes('-PallowDebugReleaseSigning=true'));
 });
 
+test('tracked generic release config contains no maintainer deployment', () => {
+  const options = parseBuildOptions(['--config=config/release.generic.json']);
+  assert.equal(options.metadata.APP_NAME, 'Cloudreve');
+  assert.equal(options.metadata.APP_APPLICATION_ID, 'com.example.cloudreve');
+  assert.equal(options.metadata.CLOUDREVE_SITE_URL, '');
+});
+
 test('Unicode and shell punctuation are safely base64 encoded for both platforms', () => {
   const options = parseBuildOptions([
     '--app-name', '团队 云盘 & "Archive"', '--application-id=com.example.archive',

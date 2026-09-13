@@ -1,0 +1,153 @@
+name: Publish generic Android package
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag matching pubspec.yaml, for example v1.0.0
+        required: true
+        default: v1.0.0
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: publish-android-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version-file: .fvmrc
+          channel: stable
+
+      - name: Validate release tag and metadata
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          version_line="$(sed -nE 's/^version:[[:space:]]*([^+]+)\+([0-9]+)$/\1 \2/p' pubspec.yaml)"
+          read -r version_name version_code <<<"$version_line"
+          test -n "$version_name"
+          test "$RELEASE_TAG" = "v$version_name"
+          echo "version_name=$version_name" >> "$GITHUB_OUTPUT"
+          echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
+
+      - name: Restore locked dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Verify source and tests
+        run: |
+          node tool/check_repository.mjs
+          node --test tool/build_android_test.mjs
+          dart format --output=none --set-exit-if-changed lib test
+          dart analyze --fatal-infos
+          flutter test --no-pub
+
+      - name: Restore release signing key
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_BASE64" || { echo "Missing ANDROID_RELEASE_KEYSTORE_BASE64"; exit 1; }
+          test -n "$STORE_PASSWORD" || { echo "Missing ANDROID_RELEASE_STORE_PASSWORD"; exit 1; }
+          test -n "$KEY_ALIAS" || { echo "Missing ANDROID_RELEASE_KEY_ALIAS"; exit 1; }
+          test -n "$KEY_PASSWORD" || { echo "Missing ANDROID_RELEASE_KEY_PASSWORD"; exit 1; }
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/cloudreve-release.jks"
+          chmod 600 "$RUNNER_TEMP/cloudreve-release.jks"
+
+      - name: Build generic release APKs
+        env:
+          CLOUDREVE_KEYSTORE_PATH: ${{ runner.temp }}/cloudreve-release.jks
+          CLOUDREVE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          CLOUDREVE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          CLOUDREVE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        run: |
+          flutter build apk \
+            --release \
+            --split-per-abi \
+            --no-pub \
+            --dart-define-from-file=config/release.generic.json
+
+      - name: Prepare versioned assets
+        shell: bash
+        env:
+          VERSION_NAME: ${{ steps.metadata.outputs.version_name }}
+        run: |
+          set -euo pipefail
+          mkdir dist
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk "dist/cloudreve-android-$VERSION_NAME-armeabi-v7a.apk"
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "dist/cloudreve-android-$VERSION_NAME-arm64-v8a.apk"
+          cp build/app/outputs/flutter-apk/app-x86_64-release.apk "dist/cloudreve-android-$VERSION_NAME-x86_64.apk"
+          sha256sum dist/*.apk > dist/SHA256SUMS.txt
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cloudreve-android-${{ steps.metadata.outputs.version_name }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish APK bundle to GitHub Packages
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION_NAME: ${{ steps.metadata.outputs.version_name }}
+        run: |
+          set -euo pipefail
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          image="ghcr.io/$owner/cloudreve-android-apk"
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker build \
+            --file packaging/android-apk.Dockerfile \
+            --build-arg "SOURCE_URL=https://github.com/$GITHUB_REPOSITORY" \
+            --build-arg "VERSION=$VERSION_NAME" \
+            --tag "$image:$VERSION_NAME" \
+            --tag "$image:latest" \
+            .
+          docker push "$image:$VERSION_NAME"
+          docker push "$image:latest"
+
+      - name: Publish directly downloadable GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists; refusing to replace its assets."
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Cloudreve Android $RELEASE_TAG" \
+            --generate-notes
