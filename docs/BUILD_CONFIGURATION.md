@@ -34,6 +34,8 @@ tool\build_android_release.cmd --app-name "团队云盘" --dry-run
 
 复制 `config/app.example.json` 为 `config/app.local.json`，再自行填写公开元数据。没有配置版本字段时仍读取 pubspec.yaml。
 
+维护者本机使用被 Git 忽略的 `config/personal.local.json`。只要该文件存在，`tool/build_android_release.cmd` 和直接运行 `node tool/build_android.mjs` 时会自动读取它；显式传入 `--config` 才会覆盖。`tool/run_android.cmd` 与 `tool/build_android_debug.cmd` 在个人配置缺失时会直接停止，避免误生成没有个人登录站点的本地包。GitHub Actions 不走这些本地默认值，并始终显式读取 `config/release.generic.json`。
+
 ```json
 {
   "APP_NAME": "团队云盘",
@@ -47,6 +49,8 @@ tool\build_android_release.cmd --app-name "团队云盘" --dry-run
 
 ```bat
 tool\build_android_release.cmd --config config/app.local.json --split-per-abi
+tool\run_android.cmd
+tool\build_android_debug.cmd
 ```
 
 优先级：命令参数 > JSON > 通用默认值 / pubspec.yaml，与参数出现顺序无关。`--site-url=` 可显式取消默认站点。个人配置保存在被 Git 忽略的 `config/*.local.json` 中；不要把它改成会被提交的文件名。

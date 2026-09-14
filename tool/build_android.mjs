@@ -1,6 +1,6 @@
 // Public build metadata only. Credentials belong in the signing environment.
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -21,6 +21,18 @@ const valueOptions = {
 };
 const flags = new Set(['--online', '--split-per-abi', '--local-test', '--dry-run', '--help']);
 const knownKeys = new Set([...Object.keys(defaults), 'APP_VERSION_NAME', 'APP_VERSION_CODE']);
+
+export function withLocalConfiguration(argv, {
+  exists = existsSync,
+  projectRoot = root,
+} = {}) {
+  const explicit = argv.some((token, index) =>
+    token === '--config' && argv[index + 1] !== undefined ||
+    token.startsWith('--config='));
+  if (explicit || argv.includes('--help')) return [...argv];
+  const personal = resolve(projectRoot, 'config', 'personal.local.json');
+  return exists(personal) ? ['--config', personal, ...argv] : [...argv];
+}
 
 export function validateMetadata(input) {
   for (const key of Object.keys(input)) {
@@ -129,7 +141,7 @@ Keep the same application ID and signing key to update an existing installation.
 `;
 
 export function main(argv = process.argv.slice(2)) {
-  const options = parseBuildOptions(argv);
+  const options = parseBuildOptions(withLocalConfiguration(argv));
   if (options.help) { console.log(help); return 0; }
   console.log(JSON.stringify(options.metadata, null, 2));
   if (options.flags.has('--dry-run')) { console.log('Configuration valid. No build or source edits performed.'); return 0; }

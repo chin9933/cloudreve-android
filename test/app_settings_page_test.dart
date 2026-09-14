@@ -2,6 +2,7 @@ import 'package:cloudreve/entity/login_result.dart';
 import 'package:cloudreve/state/page_transition_provider.dart';
 import 'package:cloudreve/state/sound_effect_provider.dart';
 import 'package:cloudreve/theme/app_theme.dart';
+import 'package:cloudreve/utils/app_update_service.dart';
 import 'package:cloudreve/utils/dark_mode_provider.dart';
 import 'package:cloudreve/view/app_settings_page.dart';
 import 'package:flutter/material.dart';
@@ -99,6 +100,59 @@ void main() {
       preferences.getString(PageTransitionProvider.preferenceKey),
       PageTransitionStyle.fade.name,
     );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('application information exposes update check and APK download', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final opened = <Uri>[];
+    final release = AppRelease(
+      tagName: 'v9.0.0',
+      version: '9.0.0',
+      releasePage: Uri.parse(
+        'https://github.com/example/project/releases/tag/v9.0.0',
+      ),
+      assets: [
+        AppReleaseAsset(
+          name: 'cloudreve-android-9.0.0-arm64-v8a.apk',
+          downloadUri: Uri.parse('https://example.com/cloudreve-arm64.apk'),
+          size: 30,
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: CloudreveTheme.light(),
+        home: AppInformationPage(
+          latestReleaseLoader: () async => release,
+          urlOpener: (uri) async {
+            opened.add(uri);
+            return true;
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final check = find.byKey(const Key('check-app-update'));
+    final latest = find.byKey(const Key('download-latest-release'));
+    expect(check, findsOneWidget);
+    expect(latest, findsOneWidget);
+    await tester.ensureVisible(check);
+    await tester.tap(check);
+    await tester.pumpAndSettle();
+    expect(find.text('发现新版本'), findsOneWidget);
+    expect(find.byKey(const Key('download-app-update')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('download-app-update')));
+    await tester.pumpAndSettle();
+    expect(opened.single.toString(), contains('cloudreve-arm64.apk'));
     expect(tester.takeException(), isNull);
   });
 

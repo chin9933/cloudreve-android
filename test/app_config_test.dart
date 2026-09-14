@@ -37,25 +37,31 @@ void main() {
     },
   );
 
-  test('persisted selection wins over changed build defaults; last server can be removed', () async {
-    final prefs = await SharedPreferences.getInstance();
-    const chosen = 'https://chosen.example/api/v4/';
-    await const ServerPreferences([chosen], chosen).save(prefs);
-    expect(
-      ServerPreferences.read(
+  test(
+    'persisted selection wins while a configured build default is restored',
+    () async {
+      final prefs = await SharedPreferences.getInstance();
+      const chosen = 'https://chosen.example/api/v4/';
+      await const ServerPreferences([chosen], chosen).save(prefs);
+      expect(
+        ServerPreferences.read(
+          prefs,
+          defaultUrl: 'https://new.example',
+        ).selectedUrl,
+        chosen,
+      );
+      await const ServerPreferences([], '').save(prefs);
+      final restored = ServerPreferences.read(
         prefs,
         defaultUrl: 'https://new.example',
-      ).selectedUrl,
-      chosen,
-    );
-    await const ServerPreferences([], '').save(prefs);
-    final empty = ServerPreferences.read(
-      prefs,
-      defaultUrl: 'https://new.example',
-    );
-    expect(empty.urls, isEmpty);
-    expect(empty.selectedUrl, isEmpty);
-  });
+      );
+      expect(restored.urls, ['https://new.example/api/v4/']);
+      expect(restored.selectedUrl, 'https://new.example/api/v4/');
+      final removableWithoutPreset = ServerPreferences.read(prefs);
+      expect(removableWithoutPreset.urls, isEmpty);
+      expect(removableWithoutPreset.selectedUrl, isEmpty);
+    },
+  );
 
   test(
     'legacy custom servers retain selection and invalid entries are filtered',

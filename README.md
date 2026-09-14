@@ -84,6 +84,8 @@ flutter run
 flutter run --dart-define-from-file=config/app.local.json
 ```
 
+维护者本机若存在被忽略的 `config/personal.local.json`，请在 Windows 使用 `tool\run_android.cmd` 运行、使用 `tool\build_android_debug.cmd` 构建调试包；本地 release 包装命令也会自动读取这份个人配置。GitHub Actions 始终显式使用通用配置，不会上传个人配置内容。
+
 这些参数会进入 APK，**不能用于保存密码、令牌或密钥**。`config/*.local.json` 默认由 Git 忽略。配置优先级、版本号及更多示例见 [构建配置说明](docs/BUILD_CONFIGURATION.md)。
 
 ### Android APK

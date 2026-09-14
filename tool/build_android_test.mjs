@@ -1,6 +1,32 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { defaults, gradleArguments, parseBuildOptions } from './build_android.mjs';
+import {
+  defaults,
+  gradleArguments,
+  parseBuildOptions,
+  withLocalConfiguration,
+} from './build_android.mjs';
+
+test('local commands prefer ignored personal config while explicit generic builds stay generic', () => {
+  const local = withLocalConfiguration(['--local-test'], {
+    exists: path => path.endsWith('config\\personal.local.json') ||
+      path.endsWith('config/personal.local.json'),
+    projectRoot: 'C:\\workspace',
+  });
+  assert.equal(local[0], '--config');
+  assert.match(local[1], /personal\.local\.json$/u);
+  assert.deepEqual(local.slice(2), ['--local-test']);
+  assert.deepEqual(
+    withLocalConfiguration(['--config=config/release.generic.json'], {
+      exists: () => true,
+    }),
+    ['--config=config/release.generic.json'],
+  );
+  assert.deepEqual(
+    withLocalConfiguration(['--help'], {exists: () => true}),
+    ['--help'],
+  );
+});
 
 test('generic defaults have no deployment server; version comes from pubspec', () => {
   const options = parseBuildOptions([], {read: () => 'version: 2.7.0+19'});

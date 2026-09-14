@@ -30,7 +30,10 @@ class ServerPreferences {
     final current = normalizeOrEmpty(currentUrl);
     final fallback = normalizeOrEmpty(defaultUrl);
     final candidates = migrated
-        ? prefs.getStringList(listKey) ?? const <String>[]
+        ? <String>[
+            if (fallback.isNotEmpty) fallback,
+            ...(prefs.getStringList(listKey) ?? const <String>[]),
+          ]
         : <String>[
             if (current.isNotEmpty) current,
             if (fallback.isNotEmpty) fallback,
@@ -44,6 +47,7 @@ class ServerPreferences {
     String selected;
     if (migrated) {
       selected = normalizeOrEmpty(prefs.getString(selectionKey));
+      if (selected.isEmpty && fallback.isNotEmpty) selected = fallback;
     } else if (current.isNotEmpty) {
       selected = current;
     } else if (prefs.containsKey(selectedIndexKey)) {

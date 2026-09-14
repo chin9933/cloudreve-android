@@ -1,7 +1,7 @@
 name: cloudreve
 description: Native Flutter Android client for Cloudreve v4 with file management and media playback.
 publish_to: none
-version: 1.0.0+1
+version: 1.0.1+2
 
 environment:
   sdk: ^3.13.0

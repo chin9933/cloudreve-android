@@ -5,6 +5,7 @@ import 'package:cloudreve/state/app_state.dart';
 import 'package:cloudreve/state/page_transition_provider.dart';
 import 'package:cloudreve/state/sound_effect_provider.dart';
 import 'package:cloudreve/theme/app_theme.dart';
+import 'package:cloudreve/utils/app_update_service.dart';
 import 'package:cloudreve/utils/cloudreve_repository.dart';
 import 'package:cloudreve/utils/dark_mode_provider.dart';
 import 'package:dio/dio.dart';
@@ -12,6 +13,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class AppSettingsPage extends StatelessWidget {
   const AppSettingsPage({super.key, required this.userData});
@@ -429,7 +431,14 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
 }
 
 class AppInformationPage extends StatefulWidget {
-  const AppInformationPage({super.key});
+  const AppInformationPage({
+    super.key,
+    this.latestReleaseLoader,
+    this.urlOpener,
+  });
+
+  final Future<AppRelease> Function()? latestReleaseLoader;
+  final Future<bool> Function(Uri uri)? urlOpener;
 
   @override
   State<AppInformationPage> createState() => _AppInformationPageState();
@@ -437,6 +446,9 @@ class AppInformationPage extends StatefulWidget {
 
 class _AppInformationPageState extends State<AppInformationPage> {
   late final Future<PackageInfo?> _packageInfo = _loadPackageInfo();
+  late final AppUpdateService _updates = AppUpdateService();
+  bool _checkingUpdate = false;
+  bool _openingDownload = false;
 
   Future<PackageInfo?> _loadPackageInfo() async {
     try {
@@ -444,6 +456,80 @@ class _AppInformationPageState extends State<AppInformationPage> {
     } catch (_) {
       return null;
     }
+  }
+
+  Future<AppRelease> _loadLatestRelease() =>
+      widget.latestReleaseLoader?.call() ?? _updates.latest();
+
+  Future<bool> _openUri(Uri uri) =>
+      widget.urlOpener?.call(uri) ??
+      launchUrl(uri, mode: LaunchMode.externalApplication);
+
+  Future<void> _checkForUpdates(String currentVersion) async {
+    if (_checkingUpdate) return;
+    setState(() => _checkingUpdate = true);
+    try {
+      final release = await _loadLatestRelease();
+      if (!mounted) return;
+      setState(() => _checkingUpdate = false);
+      final hasUpdate = AppUpdateService.isNewer(
+        release.version,
+        currentVersion,
+      );
+      await showModalBottomSheet<void>(
+        context: context,
+        useSafeArea: true,
+        showDragHandle: true,
+        builder: (sheetContext) => _UpdateReleaseSheet(
+          currentVersion: currentVersion,
+          release: release,
+          hasUpdate: hasUpdate,
+          onDownload: () {
+            Navigator.pop(sheetContext);
+            _openReleaseDownload(release);
+          },
+        ),
+      );
+    } catch (error) {
+      if (mounted) _showUpdateError(error);
+    } finally {
+      if (mounted && _checkingUpdate) {
+        setState(() => _checkingUpdate = false);
+      }
+    }
+  }
+
+  Future<void> _downloadLatest() async {
+    if (_openingDownload) return;
+    setState(() => _openingDownload = true);
+    try {
+      final release = await _loadLatestRelease();
+      await _openReleaseDownload(release);
+    } catch (error) {
+      final opened = await _openUri(AppUpdateService.releasesPage);
+      if (!opened && mounted) _showUpdateError(error);
+    } finally {
+      if (mounted) setState(() => _openingDownload = false);
+    }
+  }
+
+  Future<void> _openReleaseDownload(AppRelease release) async {
+    final asset = release.apkFor(currentAndroidReleaseAbi());
+    final opened = await _openUri(asset?.downloadUri ?? release.releasePage);
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('无法打开下载页面，请稍后重试')));
+    }
+  }
+
+  void _showUpdateError(Object error) {
+    final message = switch (error) {
+      DioException() => '检查更新失败，请确认网络连接后重试',
+      FormatException() => '发行信息格式异常，请稍后重试',
+      _ => '检查更新失败，请稍后重试',
+    };
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -524,6 +610,47 @@ class _AppInformationPageState extends State<AppInformationPage> {
                 ),
               ),
               const SizedBox(height: 24),
+              const _SectionTitle(title: '应用更新'),
+              const SizedBox(height: 10),
+              CloudrevePanel(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                child: Column(
+                  children: [
+                    _SettingsTile(
+                      key: const Key('check-app-update'),
+                      icon: Icons.system_update_alt_rounded,
+                      iconColor: CloudreveColors.success,
+                      title: '检查更新',
+                      trailing: _checkingUpdate
+                          ? const SizedBox.square(
+                              dimension: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.2,
+                              ),
+                            )
+                          : null,
+                      onTap: () => _checkForUpdates(info?.version ?? '0.0.0'),
+                    ),
+                    const _InsetDivider(),
+                    _SettingsTile(
+                      key: const Key('download-latest-release'),
+                      icon: Icons.download_rounded,
+                      iconColor: CloudreveColors.primary,
+                      title: '下载最新版',
+                      trailing: _openingDownload
+                          ? const SizedBox.square(
+                              dimension: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.2,
+                              ),
+                            )
+                          : null,
+                      onTap: _downloadLatest,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
               CloudrevePanel(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                 child: _SettingsTile(
@@ -548,6 +675,107 @@ class _AppInformationPageState extends State<AppInformationPage> {
       },
     );
   }
+}
+
+class _UpdateReleaseSheet extends StatelessWidget {
+  const _UpdateReleaseSheet({
+    required this.currentVersion,
+    required this.release,
+    required this.hasUpdate,
+    required this.onDownload,
+  });
+
+  final String currentVersion;
+  final AppRelease release;
+  final bool hasUpdate;
+  final VoidCallback onDownload;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color:
+                      (hasUpdate
+                              ? CloudreveColors.success
+                              : CloudreveColors.primary)
+                          .withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                child: Icon(
+                  hasUpdate
+                      ? Icons.system_update_rounded
+                      : Icons.verified_rounded,
+                  color: hasUpdate
+                      ? CloudreveColors.success
+                      : CloudreveColors.primary,
+                ),
+              ),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Text(
+                  hasUpdate ? '发现新版本' : '当前已是最新版',
+                  style: Theme.of(context).textTheme.titleLarge
+                      ?.copyWith(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              color: colors.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Column(
+              children: [
+                _UpdateVersionRow(label: '当前版本', value: currentVersion),
+                const SizedBox(height: 10),
+                _UpdateVersionRow(label: '最新版本', value: release.version),
+              ],
+            ),
+          ),
+          const SizedBox(height: 18),
+          FilledButton.icon(
+            key: const Key('download-app-update'),
+            onPressed: onDownload,
+            icon: const Icon(Icons.download_rounded),
+            label: Text(hasUpdate ? '下载更新' : '重新下载最新版'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _UpdateVersionRow extends StatelessWidget {
+  const _UpdateVersionRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+      const Spacer(),
+      Text(
+        value,
+        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+      ),
+    ],
+  );
 }
 
 class _SectionTitle extends StatelessWidget {
